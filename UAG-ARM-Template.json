@@ -1,0 +1,233 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "adminUsername": {
+            "type": "string",
+            "metadata": {
+              "description": "Username for the Virtual Machine."
+            }
+        },
+        "adminPassword": {
+            "type": "string",
+            "metadata": {
+              "description": "Password for the Virtual Machine."
+            }
+        },
+        "location": {
+            "type": "string"
+        },          
+        "customdata": {
+            "type": "string"
+        },
+        "vmName": {
+            "type": "string"
+        },
+        "imageResourceGroup": {
+            "type": "string"
+        },
+        "imageURI": {
+            "type": "string",
+            "metadata": {
+                "description": "The URI of the UAG VHD in blob storage"
+            }
+        },
+        "vhd_uag": {
+            "type": "string",
+            "metadata": {
+                "description": "The actual name of the UAG VHD that sits inside the storage account"
+            }
+        },
+        "vmSize":{
+            "type": "string"
+        },
+        "availabilitySet_Name":{
+            "type": "string"
+        },
+        "availabilitySet_RG":{
+            "type": "string"
+        },
+        "storageAccount_Name":{
+            "type": "string",
+            "metadata": {
+                "description": "The Name of the storage account that hosts the UAG vhd"
+            }
+        },
+        "storageAccount_RG":{
+            "type": "string",
+            "metadata": {
+                "description": "The RG of the storage account that hosts the UAG vhd"
+            }
+        },
+        "vNet_Name":{
+            "type": "string"
+        },
+        "vNet_RG":{
+            "type": "string"
+        },
+        "NSGInternet_Name":{
+            "type": "string"
+        },
+        "NSGInternet_RG":{
+            "type": "string"
+        },
+        "NSGMgmt_Name":{
+            "type": "string"
+        },
+        "NSGMgmt_RG":{
+            "type": "string"
+        },
+        "SubnetInternet_Name":{
+            "type": "string"
+        },
+        "SubnetMgmt_Name":{
+            "type": "string"
+        }
+    },
+    "variables": {
+        "virtualNetwork_UAG_subnet": "subnet0"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Compute/availabilitySets",
+            "apiVersion": "2022-08-01",
+            "name": "[parameters('availabilitySet_Name')]",
+            "location": "[parameters('location')]",
+            "sku": {
+                "name": "Aligned"
+            },
+            "properties": {
+                "platformUpdateDomainCount": 6,
+                "platformFaultDomainCount": 3,
+                "virtualMachines": []
+            }
+        },
+        {
+            "type": "Microsoft.Compute/images",
+            "apiVersion": "2022-08-01",
+            "name": "[concat(parameters('vhd_uag'),'_Image')]",
+            "location": "[parameters('location')]",
+            "properties": {
+                "storageProfile": {
+                    "osDisk": {
+                        "osType": "Linux",
+                        "osState": "Generalized",
+                        "diskSizeGB": 20,
+                        "blobUri": "[parameters('imageURI')]",
+                        "caching": "None",
+                        "storageAccountType": "Standard_LRS"
+                    },
+                    "dataDisks": [],
+                    "zoneResilient": false
+                },
+                "hyperVGeneration": "V1"
+            }
+        },
+        {
+            "type": "Microsoft.Network/networkInterfaces",
+            "apiVersion": "2022-05-01",
+            "name": "[concat(parameters('vmName'),'-NIC-Internet')]", 
+            "location": "[parameters('location')]",
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "ipconfig1",
+                        "properties": {
+                            "privateIPAllocationMethod": "Dynamic",
+                            "subnet": {
+                                "id": "[resourceId(parameters('vNet_RG'),'Microsoft.Network/virtualNetworks/subnets', parameters('vNet_Name'), parameters('SubnetInternet_Name'))]"
+                            }
+                        }
+                    }
+                ],
+                "networkSecurityGroup": {
+                    "id": "[resourceId(parameters('NSGInternet_RG'),'Microsoft.Network/networkSecurityGroups', parameters('NSGInternet_Name'))]"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Network/networkInterfaces",
+            "apiVersion": "2022-05-01",
+            "name": "[concat(parameters('vmName'),'-NIC-Mgmt')]", 
+            "location": "[parameters('location')]",
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "ipconfig1",
+                        "properties": {
+                            "privateIPAllocationMethod": "Dynamic",
+                            "subnet": {
+                                "id": "[resourceId(parameters('vNet_RG'),'Microsoft.Network/virtualNetworks/subnets', parameters('vNet_Name'), parameters('SubnetMgmt_Name'))]"
+                               
+                            }
+                        }
+                    }
+                ],
+                "networkSecurityGroup": {
+                    "id": "[resourceId(parameters('NSGMgmt_RG'),'Microsoft.Network/networkSecurityGroups', parameters('NSGMgmt_Name'))]"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Compute/virtualMachines",
+            "apiVersion": "2022-08-01",
+            "name": "[parameters('vmName')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/networkInterfaces', concat(parameters('vmName'),'-NIC-Internet'))]",
+                "[resourceId('Microsoft.Network/networkInterfaces', concat(parameters('vmName'),'-NIC-Mgmt'))]",
+                "[resourceId('Microsoft.Compute/images/', concat(parameters('vhd_uag'),'_Image'))]",
+                "[resourceId('Microsoft.Compute/availabilitySets', parameters('availabilitySet_Name'))]"
+            ],
+            "properties": {
+                "hardwareProfile": {
+                    "vmSize": "[parameters('vmSize')]"
+                },
+                "osProfile": {
+                    "computerName": "[parameters('vmName')]",
+                    "adminUsername": "[parameters('adminUsername')]",
+                    "adminPassword": "[parameters('adminPassword')]",
+                    "customData": "[base64(parameters('customData'))]"
+                },
+                "storageProfile": {
+                    "imageReference": {
+                        "id": "[concat('/subscriptions/', subscription().subscriptionId, '/resourceGroups/', parameters('imageResourceGroup'), '/providers/', 'Microsoft.Compute/Images/', parameters('vhd_uag'), '_Image')]"
+                        //Not sure why they create a long string instead of resourceID
+                    },
+                    "osDisk": {
+                        "name": "[parameters('vmName')]",
+                        "osType": "Linux",
+                        "diskSizeGB": 40,
+                        "caching": "ReadWrite",
+                        "createOption": "FromImage",
+                        "managedDisk": {
+                            "storageAccountType": "Standard_LRS"
+                        }
+                    }
+                },
+                "networkProfile": {
+                    "networkInterfaces": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces', concat(parameters('vmName'),'-NIC-Internet'))]",
+                            "properties":
+                            {
+                                "primary": true
+                            }
+                        },
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces', concat(parameters('vmName'),'-NIC-Mgmt'))]",
+                            "properties":
+                            {
+                                "primary": false
+                            }
+                        }
+                    ]
+                },
+                "availabilitySet": {
+                    "id": "[resourceId('Microsoft.Compute/availabilitySets', parameters('availabilitySet_Name'))]"
+
+                }
+            }
+        } 
+    ]
+}
